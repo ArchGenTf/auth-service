@@ -6,17 +6,21 @@ from utils.auth_helper import hash_password, verify_password, create_access_toke
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+
 class UserRegisterInput(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=6)
     email: str = Field(..., pattern=r"^[\w\.-]+@[\w\.-]+\.\w+$")
 
+
 class UserLoginInput(BaseModel):
     username: str
     password: str
 
+
 class TokenRefreshInput(BaseModel):
     refresh_token: str
+
 
 # Helper dependency to resolve current user from JWT token headers
 async def get_current_user(authorization: Optional[str] = Header(None)):
@@ -49,6 +53,7 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
 
     return {"id": str(user["_id"]), "username": user["username"], "email": user["email"]}
 
+
 @router.post("/register")
 async def register(input_data: UserRegisterInput):
     db = get_database()
@@ -72,6 +77,7 @@ async def register(input_data: UserRegisterInput):
 
     await db["users"].insert_one(user_doc)
     return {"status": "success", "message": "Registration completed successfully."}
+
 
 @router.post("/login")
 async def login(input_data: UserLoginInput):
@@ -105,6 +111,7 @@ async def login(input_data: UserLoginInput):
         }
     }
 
+
 @router.post("/refresh")
 async def refresh_token(input_data: TokenRefreshInput):
     payload = decode_token(input_data.refresh_token)
@@ -114,6 +121,8 @@ async def refresh_token(input_data: TokenRefreshInput):
     new_access = create_access_token({"sub": payload.get("sub")})
     return {"access_token": new_access}
 
+
 @router.get("/me")
 async def get_me(current_user: dict = Depends(get_current_user)):
     return current_user
+
