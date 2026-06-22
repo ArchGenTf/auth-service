@@ -125,4 +125,3 @@ async def refresh_token(input_data: TokenRefreshInput):
 @router.get("/me")
 async def get_me(current_user: dict = Depends(get_current_user)):
     return current_user
-

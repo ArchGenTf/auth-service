@@ -59,4 +59,3 @@ db_manager = DatabaseManager()
 def get_database():
     """Dependency resolver returning the database context for auth service."""
     return db_manager.db
-

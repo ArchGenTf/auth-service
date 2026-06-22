@@ -33,4 +33,3 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     await db_manager.close_database_connection()
-
