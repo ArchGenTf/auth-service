@@ -10,9 +10,9 @@ The service defines authentication models and business logic in [routes/auth.py]
 
 ```mermaid
 graph LR
-    Client -->|Credential Details| API_Gateway -->|Forward| Auth_Svc[Auth Service]
-    Auth_Svc -->|Bcrypt Verify| MongoDB[(MongoDB: Users Collection)]
-    Auth_Svc -->|Signs JWT| Tokens[Access & Refresh Tokens]
+    Client -->|"Credential Details"| API_Gateway -->|"Forward"| Auth_Svc[Auth Service]
+    Auth_Svc -->|"Bcrypt Verify"| MongoDB[(MongoDB: Users Collection)]
+    Auth_Svc -->|"Signs JWT"| Tokens[Access & Refresh Tokens]
 ```
 
 ### Hashing & Security Policies:
