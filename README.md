@@ -1,76 +1,199 @@
-# Auth Service Microservice
+# Authentication Service (auth-service)
 
-### Test-7
-
-This repository houses the Auth Service microservice. CI/CD builds, quality checks, and GitOps promotions are handled via the centralized modular pipeline.
+The Auth Service manages user registration, session authentication, password hashing, and JSON Web Token (JWT) issuance. Built with **FastAPI** and using **MongoDB** (via the asynchronous **Motor** driver) as its database, it provides the secure foundation for authentication across the entire ArchGen platform.
 
 ---
 
-## CI/CD Pipeline Triggers
+## 1. Architecture & Security Context
 
-The calling workflow [.github/workflows/ci-cd.yml](.github/workflows/ci-cd.yml) triggers on two events:
-1. **Pull Request to `master`**: Runs the `pr-checks` job inside the reusable `backend.yml` pipeline.
-2. **Merge/Push to `master`**: Runs the `build` job inside the reusable `backend.yml` pipeline.
+The service defines authentication models and business logic in [routes/auth.py](file:///c:/Users/Praveen/Desktop/New%20folder/auth-service/routes/auth.py) and utilizes helpers in [utils/auth_helper.py](file:///c:/Users/Praveen/Desktop/New%20folder/auth-service/utils/auth_helper.py).
 
-### Pipeline Stages
+```mermaid
+graph LR
+    Client -->|Credential Details| API_Gateway -->|Forward| Auth_Svc[Auth Service]
+    Auth_Svc -->|Bcrypt Verify| MongoDB[(MongoDB: Users Collection)]
+    Auth_Svc -->|Signs JWT| Tokens[Access & Refresh Tokens]
+```
 
-#### PR Checks (`pull_request`)
-1. **Lint Check**: Checks python code formatting using `flake8`.
-2. **SonarCloud Scan**: Validates code quality and safety.
-3. **Snyk Scan**: Scans python library dependencies for CVEs.
-4. **Notifications**: Sends Slack notifications with the results.
-
-#### Build & Deploy (`push`)
-1. **Metadata Generation**: Creates a short SHA tag (e.g. `sha-f32a762`).
-2. **Docker Build**: Compiles the image using the local `Dockerfile`.
-3. **Trivy CVE Scan**: Checks the compiled container image for vulnerabilities.
-4. **Registry Push**: Pushes the image to `acrarchgen.azurecr.io/auth-service` with the short SHA tag and the `latest` tag.
-5. **Repository Dispatch**: Fires a `service-image-updated` dispatch event to the `Main` repo to trigger automatic deployment to Dev.
-6. **Notifications**: Sends Slack notifications.
-
----
-
-## Required Secrets Setup & Generation Guide
-
-Add these secrets to your GitHub repository under `Settings` -> `Secrets and variables` -> `Actions` to authorize and run the pipeline:
-
-### 1. `GH_PAT` (GitHub Personal Access Token)
-*Required. Needed to check out and push tag updates to the Main repository and trigger dispatches.*
-1. Go to your GitHub profile settings: `Settings` -> `Developer settings` -> `Personal access tokens` -> `Tokens (classic)`.
-2. Click **Generate new token** -> **Generate new token (classic)**.
-3. Set the note (e.g., `gitops-infra-token`) and check the `repo` scope checkbox.
-4. Click **Generate token** and copy it immediately.
-5. Save this as `GH_PAT` in your service repository secrets.
-
-### 2. `AZURE_CREDENTIALS` (Azure Service Principal)
-*Required. Needed to authenticate and push container images to Azure Container Registry (`acrarchgen.azurecr.io`).*
-1. Open the Azure CLI or Cloud Shell.
-2. Generate a Service Principal JSON payload by running:
-   ```bash
-   az ad sp create-for-rbac --name "github-actions-sp" --role contributor --scopes /subscriptions/<SUBSCRIPTION_ID>/resourceGroups/<RESOURCE_GROUP_NAME> --sdk-auth
-   ```
-   *(Replace `<SUBSCRIPTION_ID>` and `<RESOURCE_GROUP_NAME>` with your Azure subscription ID and resource group where your ACR resides)*
-3. Copy the output JSON block and save it as `AZURE_CREDENTIALS` in your repository secrets.
-
-### 3. `SLACK_WEBHOOK` (Slack Incoming Webhook URL)
-*Optional. Needed to send pipeline success/failure alerts to Slack.*
-1. Create a Slack App in your workspace via the [Slack API console](https://api.slack.com/apps).
-2. Go to **Incoming Webhooks** and toggle it **On**.
-3. Click **Add New Webhook to Workspace**, select the target channel, and click **Allow**.
-4. Copy the generated Webhook URL (starts with `https://hooks.slack.com/services/`).
-5. Save this as `SLACK_WEBHOOK` in your repository secrets.
-
-### 4. SonarCloud & Snyk Secrets
-*Optional. Configure these to enable static code security analysis and library scanning.*
-- `SONAR_TOKEN`: API token generated from SonarCloud (`My Account` -> `Security`).
-- `SONAR_KEY`: (Optional) Custom Sonar project key (defaults to `ArchGenTf_auth-service`).
-- `SNYK_TOKEN`: Snyk API token generated from Snyk account settings.
+### Hashing & Security Policies:
+1. **Password Hashing**: Passwords are never stored in plain text. The service uses **bcrypt** (`hashpw` with adaptive work factor salt rounds) to generate cryptographic hashes.
+2. **Access Tokens**: Short-lived JWTs (typically 15-30 minutes) signed using `HS256`. It contains claims such as:
+   - `sub`: The username.
+   - `exp`: Token expiration timestamp.
+   - `type`: Set to `"access"`.
+3. **Refresh Tokens**: Long-lived JWTs (typically 7-30 days) used to retrieve a new access token without requiring password re-entry. It contains claims:
+   - `sub`: The username.
+   - `exp`: Token expiration timestamp.
+   - `type`: Set to `"refresh"`.
+4. **Secrets Configuration**: Key Vault values mapped into the environment variable `JWT_SECRET_KEY` are used to verify and sign tokens.
 
 ---
 
-## Production Release Flow
+## 2. Configuration & Environment Variables
 
-To deploy a verified image to production:
-1. Go to the `Main` (`Infra`) repository on GitHub.
-2. Publish a **GitHub Release** with a tag formatted as: `auth-service-v<version>` (e.g. `auth-service-v1.0.0`).
-3. This triggers the production release workflow, which retags the dev image to `v1.0.0` and updates `k8s/auth-service/values-prod.yaml` on the `master` branch.
+The configuration settings are loaded via standard environment bindings in [main.py](file:///c:/Users/Praveen/Desktop/New%20folder/auth-service/main.py):
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `MONGO_URI` | `str` | *Required* | Connection string to MongoDB (e.g. `mongodb://host:port/database` or Azure Cosmos DB API for MongoDB). |
+| `DATABASE_NAME` | `str` | `archgen_db` | Target MongoDB database name. |
+| `JWT_SECRET_KEY` | `str` | *Required* | Secret key for signing and verifying JWT signatures. |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `int` | `30` | Access token lifetime duration. |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `int` | `7` | Refresh token lifetime duration. |
+| `ALLOWED_ORIGINS` | `str` | `http://localhost:3000` | CORS allowed origins. |
+
+---
+
+## 3. Database Schema
+
+Users are stored in the `users` collection. A standard document layout:
+
+```json
+{
+  "_id": {"$oid": "65c829e06180a312456e7aa2"},
+  "username": "johndoe",
+  "password": "$2b$12$R9h/cIPzVE8KC6v.xWyg.O...",
+  "email": "johndoe@example.com"
+}
+```
+
+---
+
+## 4. API Reference
+
+All routes are prefixed with `/auth`. Authentication endpoints expect standard JSON content payloads.
+
+### Health Check
+
+#### `GET /healthz`
+- **Description**: Returns basic health status.
+- **Response (200 OK)**:
+  ```json
+  {
+    "status": "healthy"
+  }
+  ```
+
+#### `GET /ready` or `GET /readyz`
+- **Description**: Returns readiness probe status.
+- **Response (200 OK)**:
+  ```json
+  {
+    "status": "ready"
+  }
+  ```
+
+### User Registration
+
+#### `POST /auth/register`
+- **Description**: Creates a new user profile inside MongoDB.
+- **Request Body (`UserRegisterInput`)**:
+  ```json
+  {
+    "username": "johndoe",
+    "password": "strongPassword123",
+    "email": "johndoe@example.com"
+  }
+  ```
+  - `username`: String (length 3 to 50).
+  - `password`: String (minimum length 6).
+  - `email`: String (must conform to standard email regex).
+- **Responses**:
+  - **200 OK**: Registration successful.
+    ```json
+    {
+      "status": "success",
+      "message": "Registration completed successfully."
+    }
+    ```
+  - **400 Bad Request**: Username or email address is already in use.
+    ```json
+    {
+      "detail": "Username is already registered."
+    }
+    ```
+
+### User Login
+
+#### `POST /auth/login`
+- **Description**: Authenticates user credentials. Generates and returns JWT tokens and the user profile.
+- **Request Body (`UserLoginInput`)**:
+  ```json
+  {
+    "username": "johndoe",
+    "password": "strongPassword123"
+  }
+  ```
+- **Responses**:
+  - **200 OK**: Access and refresh tokens generated.
+    ```json
+    {
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+      "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+      "user": {
+        "username": "johndoe",
+        "email": "johndoe@example.com"
+      }
+    }
+    ```
+  - **401 Unauthorized**: Invalid credentials.
+    ```json
+    {
+      "detail": "Invalid username or password."
+    }
+    ```
+
+### Token Refresh
+
+#### `POST /auth/refresh`
+- **Description**: Issues a new short-lived access token using a valid, unexpired refresh token.
+- **Request Body (`TokenRefreshInput`)**:
+  ```json
+  {
+    "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  }
+  ```
+- **Responses**:
+  - **200 OK**: New access token returned.
+    ```json
+    {
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+    }
+    ```
+  - **401 Unauthorized**: Refresh token is malformed, expired, or invalid.
+    ```json
+    {
+      "detail": "Refresh token signature invalid or expired."
+    }
+    ```
+
+### Get User Profile
+
+#### `GET /auth/me`
+- **Description**: Returns profile details for the currently authenticated user.
+- **Request Headers**:
+  - `Authorization: Bearer <access_token>` (Required)
+- **Responses**:
+  - **200 OK**: Valid session. Returns user record details.
+    ```json
+    {
+      "id": "65c829e06180a312456e7aa2",
+      "username": "johndoe",
+      "email": "johndoe@example.com"
+    }
+    ```
+  - **401 Unauthorized**: Missing or expired access token.
+    ```json
+    {
+      "detail": "Token signature expired or malformed"
+    }
+    ```
+
+---
+
+## 5. OpenAPI & Interactive API Documentation
+
+FastAPI automatically compiles schema rules and hosts interactive documentation panels:
+- **Swagger UI**: Access at `http://localhost:8001/docs` in local dev environments.
+- **ReDoc**: Access at `http://localhost:8001/redoc` in local dev environments.
+- These endpoints provide interactive testing tools for developers to invoke login/register APIs directly from the browser.
